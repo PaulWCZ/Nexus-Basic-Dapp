@@ -63,13 +63,18 @@ contract Lottery {
         
         // Calcul des montants
         uint256 totalAmount = TICKET_PRICE * MAX_TICKETS; // 15 NEX
-        uint256 ownerShare = totalAmount - PRIZE_AMOUNT; // 5 NEX
+        uint256 revealerReward = 0.5 ether; // 0.5 NEX pour celui qui révèle
+        uint256 ownerShare = totalAmount - PRIZE_AMOUNT - revealerReward; // 4.5 NEX pour le owner
         
         // Envoi du prix au gagnant
         (bool sentToWinner, ) = winner.call{value: PRIZE_AMOUNT}("");
         require(sentToWinner, "Failed to send prize to winner");
         
-        // Envoi de la différence au créateur
+        // Envoi de la récompense à celui qui révèle
+        (bool sentToRevealer, ) = msg.sender.call{value: revealerReward}("");
+        require(sentToRevealer, "Failed to send reward to revealer");
+        
+        // Envoi du reste au créateur
         (bool sentToOwner, ) = owner.call{value: ownerShare}("");
         require(sentToOwner, "Failed to send remaining funds to owner");
         

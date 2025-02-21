@@ -91,6 +91,7 @@ describe("Lottery", function () {
       const signers = await hre.ethers.getSigners();
       const ticketPrice = await hre.ethers.parseEther("1");
       const prizeAmount = await hre.ethers.parseEther("10");
+      const revealerReward = await hre.ethers.parseEther("0.5");
 
       // Buy all tickets
       for (let i = 0; i < 15; i++) {
@@ -100,20 +101,25 @@ describe("Lottery", function () {
       // Get initial balances
       const initialContractBalance = await hre.ethers.provider.getBalance(await lottery.getAddress());
       const initialOwnerBalance = await hre.ethers.provider.getBalance(signers[0].address);
+      const initialRevealerBalance = await hre.ethers.provider.getBalance(signers[1].address);
 
-      // Reveal winner
-      await lottery.revealWinner();
+      // Reveal winner with signer[1]
+      await lottery.connect(signers[1]).revealWinner();
 
       // Get final balances
       const finalContractBalance = await hre.ethers.provider.getBalance(await lottery.getAddress());
       const finalOwnerBalance = await hre.ethers.provider.getBalance(signers[0].address);
+      const finalRevealerBalance = await hre.ethers.provider.getBalance(signers[1].address);
 
       // Contract should be empty (all funds distributed)
       expect(finalContractBalance).to.equal(0);
 
-      // Owner should receive 5 NEX (minus gas costs)
-      const ownerShare = ticketPrice * BigInt(15) - prizeAmount; // 5 NEX
+      // Owner should receive 4.5 NEX
+      const ownerShare = ticketPrice * BigInt(15) - prizeAmount - revealerReward; // 4.5 NEX
       expect(finalOwnerBalance).to.be.gt(initialOwnerBalance); // Owner received their share
+
+      // Revealer should receive 0.5 NEX (minus gas costs)
+      expect(finalRevealerBalance).to.be.gt(initialRevealerBalance); // Revealer received their reward
     });
   });
 

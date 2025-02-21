@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { BrowserProvider, JsonRpcSigner, Contract, ethers } from 'ethers'
 
-const CONTRACT_ADDRESS = '0xc8D29b794F595ca5CA8c872eB805BCa5fcFd80CF'
+const CONTRACT_ADDRESS = '0x2724b5d520f2D864F1153a891Bb02613822eAa57'
 const CONTRACT_ABI = [
   "function buyTicket() public payable",
   "function revealWinner() public",
@@ -466,14 +466,14 @@ export default function Home() {
                     >
                       Buy Ticket (1 NEXUS)
                     </button>
-                  ) : lotteryState.isOwner && (
+                  ) : (
                     <button
                       onClick={revealWinner}
                       className="px-8 py-4 text-lg font-light text-white bg-black rounded-xl
                                hover:bg-black/80 transition-all duration-200 shadow-lg
                                hover:shadow-xl hover:scale-105"
                     >
-                      Reveal Winner
+                      Reveal Winner and Earn 0.5 NEX
                     </button>
                   )}
                 </div>
