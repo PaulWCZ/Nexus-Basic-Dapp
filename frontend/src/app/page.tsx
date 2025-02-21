@@ -53,7 +53,68 @@ export default function Home() {
   const [notification, setNotification] = useState<NotificationProps | null>(null)
   const [winners, setWinners] = useState<WinnerHistory[]>([])
 
-  // Réutilisation des fonctions de base du template pour la connexion et le réseau
+  // Déclarer les fonctions avec useCallback avant leur utilisation
+  const refreshLotteryState = useCallback(async () => {
+    if (!signer) return
+    
+    const contract = new Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer)
+    try {
+      const [isOpen, currentId, ticketCount, players, owner] = await Promise.all([
+        contract.isOpen(),
+        contract.currentLotteryId(),
+        contract.getTicketCount(),
+        contract.getCurrentPlayers(),
+        contract.owner()
+      ])
+
+      setLotteryState(prev => ({
+        ...prev,
+        isOpen,
+        currentLotteryId: Number(currentId),
+        ticketCount: Number(ticketCount),
+        players,
+        isOwner: owner.toLowerCase() === userAddress.toLowerCase()
+      }))
+    } catch (error) {
+      console.error('Error refreshing lottery state:', error)
+    }
+  }, [signer, userAddress])
+
+  const checkNetwork = useCallback(async () => {
+    const chainId = await window.ethereum.request({ method: 'eth_chainId' })
+    setIsCorrectNetwork(chainId === NEXUS_CHAIN_ID)
+    return chainId === NEXUS_CHAIN_ID
+  }, [])
+
+  const handleChainChange = useCallback(async () => {
+    const networkCorrect = await checkNetwork()
+    if (networkCorrect) {
+      const provider = new BrowserProvider(window.ethereum)
+      setSigner(await provider.getSigner())
+      await refreshLotteryState()
+    }
+  }, [checkNetwork, refreshLotteryState])
+
+  const checkWalletConnection = useCallback(async () => {
+    if (typeof window.ethereum !== 'undefined') {
+      try {
+        const provider = new BrowserProvider(window.ethereum)
+        const accounts = await provider.listAccounts()
+        
+        if (accounts.length > 0) {
+          const networkCorrect = await checkNetwork()
+          setIsConnected(true)
+          if (networkCorrect) {
+            setSigner(await provider.getSigner())
+          }
+        }
+      } catch (error) {
+        console.error('Error checking wallet connection:', error)
+      }
+    }
+  }, [checkNetwork])
+
+  // Maintenant on peut utiliser les useEffect
   useEffect(() => {
     checkWalletConnection()
     if (window.ethereum) {
@@ -64,16 +125,13 @@ export default function Home() {
         window.ethereum.removeListener('chainChanged', handleChainChange)
       }
     }
-  }, [])
+  }, [checkWalletConnection, handleChainChange])
 
-  const handleChainChange = async () => {
-    const networkCorrect = await checkNetwork()
-    if (networkCorrect) {
-      const provider = new BrowserProvider(window.ethereum)
-      setSigner(await provider.getSigner())
-      await refreshLotteryState()
+  useEffect(() => {
+    if (isConnected && isCorrectNetwork) {
+      refreshLotteryState()
     }
-  }
+  }, [isConnected, isCorrectNetwork, refreshLotteryState])
 
   useEffect(() => {
     if (signer) {
@@ -83,114 +141,79 @@ export default function Home() {
   }, [signer])
 
   // Fonctions spécifiques à la loterie
-  const refreshLotteryState = async () => {
-    if (!signer) return
-    
-    const contract = new Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer)
-    try {
-      const [isOpen, currentId, ticketCount, remaining, players, owner] = await Promise.all([
-        contract.isOpen(),
-        contract.currentLotteryId(),
-        contract.getTicketCount(),
-        contract.getRemainingTickets(),
-        contract.getCurrentPlayers(),
-        contract.owner()
-      ])
-
-      setLotteryState({
-        currentLotteryId: Number(currentId),
-        isOpen,
-        ticketCount: Number(ticketCount),
-        players,
-        isOwner: owner.toLowerCase() === userAddress.toLowerCase()
-      })
-    } catch (error) {
-      console.error('Error refreshing lottery state:', error)
-    }
-  }
-
   const showNotification = (message: string, type: 'error' | 'success' | 'info') => {
     setNotification({ message, type })
     setTimeout(() => setNotification(null), 5000)
   }
 
   const buyTicket = async () => {
-    if (!signer) return
+    if (!signer) return;
     
     try {
       // Vérifier le solde d'abord
-      const balance = await signer.provider.getBalance(await signer.getAddress())
-      const balanceInNex = Number(ethers.formatEther(balance))
+      const balance = await signer.provider.getBalance(await signer.getAddress());
+      const balanceInNex = Number(ethers.formatEther(balance));
       
-      if (balanceInNex < 1.1) { // 1 NEX + gas fee estimate
+      if (balanceInNex < 1.1) {
         showNotification(
           `Insufficient balance. You have ${balanceInNex.toFixed(2)} NEX, you need at least 1.1 NEX`,
           'error'
-        )
-        return
+        );
+        return;
       }
 
-      const contract = new Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer)
-      // Check contract state first
-      const isOpen = await contract.isOpen()
+      const contract = new Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+      const isOpen = await contract.isOpen();
       if (!isOpen) {
-        console.error("The lottery is not open")
-        return
+        console.error("The lottery is not open");
+        return;
       }
 
-      // Obtenir le prix du ticket en wei
-      const ticketPrice = ethers.parseEther("1.0")
+      const ticketPrice = ethers.parseEther("1.0");
       
-      // Obtenir le gas price actuel
-      const feeData = await signer.provider.getFeeData()
-      const gasPrice = feeData.gasPrice
+      // Utiliser le gasPrice au lieu de maxFeePerGas/maxPriorityFeePerGas
+      const feeData = await signer.provider.getFeeData();
+      const gasPrice = feeData.gasPrice;
 
-      // Estimer le gas avec une configuration complète
       const gasEstimate = await contract.buyTicket.estimateGas({
         from: await signer.getAddress(),
         value: ticketPrice,
-        gasPrice: gasPrice
-      })
+        gasPrice: gasPrice // Utiliser gasPrice au lieu des paramètres EIP-1559
+      });
 
-      // Ajouter 30% de marge au gas
-      const gasLimit = Math.floor(Number(gasEstimate) * 1.3)
+      const gasLimit = Math.floor(Number(gasEstimate) * 1.3);
 
-      console.log("Transaction config:", {
-        value: ethers.formatEther(ticketPrice) + " NEX",
-        gasLimit: gasLimit,
-        gasPrice: ethers.formatUnits(gasPrice || 0, 'gwei') + " gwei"
-      })
 
-      // Envoyer la transaction avec tous les paramètres
+      // Envoyer la transaction en mode legacy
       const tx = await contract.buyTicket({
         value: ticketPrice,
         gasLimit: gasLimit,
-        gasPrice: gasPrice
-      })
+        gasPrice: gasPrice, // Utiliser gasPrice au lieu des paramètres EIP-1559
+        type: 0 // Forcer le type de transaction legacy
+      });
 
-      console.log("Transaction sent:", tx.hash)
-      setLastTxHash(tx.hash)
+      console.log("Transaction sent:", tx.hash);
+      setLastTxHash(tx.hash);
       
-      const receipt = await tx.wait()
-      console.log("Transaction confirmed:", receipt)
-      showNotification("Ticket purchased successfully", 'success')
+      const receipt = await tx.wait();
+      console.log("Transaction confirmed:", receipt);
+      showNotification("Ticket purchased successfully", 'success');
       
-      await refreshLotteryState()
+      await refreshLotteryState();
     } catch (error: any) {
-      console.error('Error details:', error)
+      console.error('Error details:', error);
       
-      // Custom error message
-      let errorMessage = 'An error occurred'
+      let errorMessage = 'An error occurred';
       if (error.code === 'CALL_EXCEPTION') {
-        errorMessage = 'Transaction failed: check your balance'
+        errorMessage = 'Transaction failed: check your balance';
       } else if (error.reason) {
-        errorMessage = error.reason
+        errorMessage = error.reason;
       }
       
-      showNotification(errorMessage, 'error')
-      throw error
+      showNotification(errorMessage, 'error');
+      throw error;
     }
-  }
+  };
 
   const revealWinner = async () => {
     if (!signer) return
@@ -218,12 +241,6 @@ export default function Home() {
     if (!hash) return ''
     return `${hash.slice(0, 6)}...${hash.slice(-4)}`
   }
-
-  const checkNetwork = useCallback(async () => {
-    const chainId = await window.ethereum.request({ method: 'eth_chainId' })
-    setIsCorrectNetwork(chainId === NEXUS_CHAIN_ID)
-    return chainId === NEXUS_CHAIN_ID
-  }, [])
 
   const switchNetwork = async () => {
     try {
@@ -270,25 +287,6 @@ export default function Home() {
       return false
     }
   }
-
-  const checkWalletConnection = useCallback(async () => {
-    if (typeof window.ethereum !== 'undefined') {
-      try {
-        const provider = new BrowserProvider(window.ethereum)
-        const accounts = await provider.listAccounts()
-        
-        if (accounts.length > 0) {
-          const networkCorrect = await checkNetwork()
-          setIsConnected(true)
-          if (networkCorrect) {
-            setSigner(await provider.getSigner())
-          }
-        }
-      } catch (error) {
-        console.error('Error checking wallet connection:', error)
-      }
-    }
-  }, [checkNetwork])
 
   const connectWallet = async () => {
     if (typeof window.ethereum !== 'undefined') {
